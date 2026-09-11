@@ -125,7 +125,7 @@
         .chart-wrapper {
             position: relative;
             width: 100%;
-            height: 580px;
+            height: 650px;
             overflow: hidden;
         }
 
@@ -133,13 +133,6 @@
             display: block;
             width: 100%;
             height: 100%;
-        }
-
-        .footer {
-            margin-top: 16px;
-            color: #60656b;
-            font-size: 12px;
-            text-align: center;
         }
 
         .refresh-button {
@@ -156,6 +149,13 @@
 
         .refresh-button:hover {
             background: #194a86;
+        }
+
+        .footer {
+            margin-top: 16px;
+            color: #60656b;
+            font-size: 12px;
+            text-align: center;
         }
 
         @media (max-width: 750px) {
@@ -176,7 +176,7 @@
             }
 
             .chart-wrapper {
-                height: 480px;
+                height: 520px;
             }
         }
     </style>
@@ -185,6 +185,7 @@
 <body>
 
 <main class="dashboard">
+
     <h1>Dresden-Klotzsche: Temperatur und absolute Feuchte</h1>
 
     <p class="subtitle">
@@ -196,6 +197,7 @@
     </div>
 
     <section id="summary" class="summary" hidden>
+
         <div class="card">
             <div class="card-label">Nächster Vorhersagewert</div>
             <div id="currentTemperature" class="card-value">–</div>
@@ -210,9 +212,11 @@
             <div class="card-label">Entfeuchtungsgrenze</div>
             <div id="thresholdValue" class="card-value">–</div>
         </div>
+
     </section>
 
     <div class="legend">
+
         <div class="legend-item">
             <span class="legend-line legend-temperature"></span>
             Temperatur [°C]
@@ -227,6 +231,7 @@
             <span class="legend-line legend-threshold"></span>
             Entfeuchtungsgrenze
         </div>
+
     </div>
 
     <div class="chart-wrapper">
@@ -240,6 +245,7 @@
     <div class="footer">
         Quelle: Open-Meteo · Referenzgrenze: 22 °C und 40 % relative Feuchte
     </div>
+
 </main>
 
 <script>
@@ -264,12 +270,18 @@
         );
     }
 
-    function mixingRatioFromDewPoint(dewPointCelsius, pressureHpa) {
+    function mixingRatioFromDewPoint(
+        dewPointCelsius,
+        pressureHpa
+    ) {
         const vaporPressure =
             saturationVaporPressure(dewPointCelsius);
 
         const denominator =
-            Math.max(pressureHpa - vaporPressure, 0.000001);
+            Math.max(
+                pressureHpa - vaporPressure,
+                0.000001
+            );
 
         return (
             0.622 *
@@ -292,7 +304,10 @@
         return (
             0.622 *
             vaporPressure /
-            Math.max(pressureHpa - vaporPressure, 0.000001) *
+            Math.max(
+                pressureHpa - vaporPressure,
+                0.000001
+            ) *
             1000
         );
     }
@@ -306,7 +321,8 @@
             return 1013.25;
         }
 
-        const middle = Math.floor(sorted.length / 2);
+        const middle =
+            Math.floor(sorted.length / 2);
 
         if (sorted.length % 2 === 0) {
             return (
@@ -452,7 +468,9 @@
             weatherRows = rows;
 
             const referencePressure =
-                median(rows.map(row => row.pressure));
+                median(
+                    rows.map(row => row.pressure)
+                );
 
             humidityThreshold =
                 calculateThreshold(referencePressure);
@@ -497,574 +515,4 @@
         ).textContent =
             first.humidity.toFixed(1) + " g/kg";
 
-        document.getElementById(
-            "thresholdValue"
-        ).textContent =
-            humidityThreshold.toFixed(1) + " g/kg";
-
-        document.getElementById(
-            "summary"
-        ).hidden = false;
-    }
-
-    function resizeAndDraw() {
-        if (weatherRows.length === 0) {
-            return;
-        }
-
-        const canvas =
-            document.getElementById("weatherCanvas");
-
-        const wrapper =
-            canvas.parentElement;
-
-        const pixelRatio =
-            window.devicePixelRatio || 1;
-
-        const width =
-            Math.max(wrapper.clientWidth, 320);
-
-        const height =
-            Math.max(wrapper.clientHeight, 320);
-
-        canvas.width =
-            Math.floor(width * pixelRatio);
-
-        canvas.height =
-            Math.floor(height * pixelRatio);
-
-        canvas.style.width =
-            width + "px";
-
-        canvas.style.height =
-            height + "px";
-
-        const context =
-            canvas.getContext("2d");
-
-        context.setTransform(
-            pixelRatio,
-            0,
-            0,
-            pixelRatio,
-            0,
-            0
-        );
-
-        drawChart(context, width, height);
-    }
-
-    function drawChart(context, width, height) {
-        context.clearRect(0, 0, width, height);
-
-        const margin = {
-            left: 70,
-            right: 75,
-            top: 30,
-            bottom: 75
-        };
-
-        const plotWidth =
-            width - margin.left - margin.right;
-
-        const plotHeight =
-            height - margin.top - margin.bottom;
-
-        const temperatures =
-            weatherRows.map(row => row.temperature);
-
-        const humidities =
-            weatherRows.map(row => row.humidity);
-
-        let temperatureMin =
-            Math.floor(Math.min(...temperatures) - 1);
-
-        let temperatureMax =
-            Math.ceil(Math.max(...temperatures) + 1);
-
-        let humidityMin =
-            Math.max(
-                0,
-                Math.floor(
-                    Math.min(
-                        ...humidities,
-                        humidityThreshold
-                    ) - 0.5
-                )
-            );
-
-        let humidityMax =
-            Math.ceil(
-                Math.max(
-                    ...humidities,
-                    humidityThreshold
-                ) + 0.5
-            );
-
-        if (temperatureMin === temperatureMax) {
-            temperatureMax++;
-        }
-
-        if (humidityMin === humidityMax) {
-            humidityMax++;
-        }
-
-        const xPosition = index =>
-            margin.left +
-            index /
-            Math.max(weatherRows.length - 1, 1) *
-            plotWidth;
-
-        const temperatureY = value =>
-            margin.top +
-            (
-                temperatureMax - value
-            ) /
-            (
-                temperatureMax - temperatureMin
-            ) *
-            plotHeight;
-
-        const humidityY = value =>
-            margin.top +
-            (
-                humidityMax - value
-            ) /
-            (
-                humidityMax - humidityMin
-            ) *
-            plotHeight;
-
-        drawWeekendAreas(
-            context,
-            margin,
-            plotHeight,
-            xPosition
-        );
-
-        drawGridAndAxes(
-            context,
-            margin,
-            plotWidth,
-            plotHeight,
-            temperatureMin,
-            temperatureMax,
-            humidityMin,
-            humidityMax,
-            temperatureY,
-            humidityY
-        );
-
-        drawThresholdAreas(
-            context,
-            margin,
-            plotHeight,
-            xPosition,
-            humidityY
-        );
-
-        drawSeries(
-            context,
-            weatherRows.map(row => row.temperature),
-            xPosition,
-            temperatureY,
-            "#8b0000",
-            2
-        );
-
-        drawSeries(
-            context,
-            weatherRows.map(row => row.humidity),
-            xPosition,
-            humidityY,
-            "#16823b",
-            2
-        );
-
-        drawThresholdLine(
-            context,
-            margin,
-            plotWidth,
-            humidityY
-        );
-
-        drawTimeLabels(
-            context,
-            margin,
-            plotHeight,
-            xPosition
-        );
-    }
-
-    function drawWeekendAreas(
-        context,
-        margin,
-        plotHeight,
-        xPosition
-    ) {
-        context.save();
-        context.fillStyle =
-            "rgba(150, 150, 150, 0.12)";
-
-        for (
-            let index = 0;
-            index < weatherRows.length;
-            index++
-        ) {
-            const day =
-                weatherRows[index].date.getDay();
-
-            if (day === 0 || day === 6) {
-                const left =
-                    index === 0
-                        ? margin.left
-                        : (
-                            xPosition(index - 1) +
-                            xPosition(index)
-                        ) / 2;
-
-                const right =
-                    index === weatherRows.length - 1
-                        ? xPosition(index)
-                        : (
-                            xPosition(index) +
-                            xPosition(index + 1)
-                        ) / 2;
-
-                context.fillRect(
-                    left,
-                    margin.top,
-                    right - left,
-                    plotHeight
-                );
-            }
-        }
-
-        context.restore();
-    }
-
-    function drawGridAndAxes(
-        context,
-        margin,
-        plotWidth,
-        plotHeight,
-        temperatureMin,
-        temperatureMax,
-        humidityMin,
-        humidityMax,
-        temperatureY,
-        humidityY
-    ) {
-        const steps = 6;
-
-        context.save();
-        context.font =
-            "12px Arial";
-
-        context.textBaseline =
-            "middle";
-
-        for (let step = 0; step <= steps; step++) {
-            const fraction =
-                step / steps;
-
-            const y =
-                margin.top +
-                plotHeight * fraction;
-
-            context.strokeStyle =
-                "rgba(0, 0, 0, 0.12)";
-
-            context.lineWidth = 1;
-
-            context.beginPath();
-            context.moveTo(margin.left, y);
-            context.lineTo(
-                margin.left + plotWidth,
-                y
-            );
-            context.stroke();
-
-            const temperatureValue =
-                temperatureMax -
-                fraction *
-                (
-                    temperatureMax -
-                    temperatureMin
-                );
-
-            const humidityValue =
-                humidityMax -
-                fraction *
-                (
-                    humidityMax -
-                    humidityMin
-                );
-
-            context.fillStyle =
-                "#8b0000";
-
-            context.textAlign =
-                "right";
-
-            context.fillText(
-                temperatureValue.toFixed(1),
-                margin.left - 9,
-                temperatureY(temperatureValue)
-            );
-
-            context.fillStyle =
-                "#16823b";
-
-            context.textAlign =
-                "left";
-
-            context.fillText(
-                humidityValue.toFixed(1),
-                margin.left + plotWidth + 9,
-                humidityY(humidityValue)
-            );
-        }
-
-        context.strokeStyle = "#555";
-        context.lineWidth = 1.2;
-
-        context.strokeRect(
-            margin.left,
-            margin.top,
-            plotWidth,
-            plotHeight
-        );
-
-        context.fillStyle =
-            "#8b0000";
-
-        context.textAlign =
-            "center";
-
-        context.fillText(
-            "Temperatur [°C]",
-            margin.left,
-            margin.top - 14
-        );
-
-        context.fillStyle =
-            "#16823b";
-
-        context.fillText(
-            "Feuchte [g/kg]",
-            margin.left + plotWidth,
-            margin.top - 14
-        );
-
-        context.restore();
-    }
-
-    function drawThresholdAreas(
-        context,
-        margin,
-        plotHeight,
-        xPosition,
-        humidityY
-    ) {
-        context.save();
-
-        for (
-            let index = 0;
-            index < weatherRows.length - 1;
-            index++
-        ) {
-            const first =
-                weatherRows[index].humidity;
-
-            const second =
-                weatherRows[index + 1].humidity;
-
-            if (
-                first < humidityThreshold &&
-                second < humidityThreshold
-            ) {
-                continue;
-            }
-
-            const x1 = xPosition(index);
-            const x2 = xPosition(index + 1);
-
-            context.fillStyle =
-                "rgba(224, 32, 32, 0.14)";
-
-            context.beginPath();
-            context.moveTo(
-                x1,
-                humidityY(humidityThreshold)
-            );
-            context.lineTo(
-                x1,
-                humidityY(
-                    Math.max(first, humidityThreshold)
-                )
-            );
-            context.lineTo(
-                x2,
-                humidityY(
-                    Math.max(second, humidityThreshold)
-                )
-            );
-            context.lineTo(
-                x2,
-                humidityY(humidityThreshold)
-            );
-            context.closePath();
-            context.fill();
-        }
-
-        context.restore();
-    }
-
-    function drawSeries(
-        context,
-        values,
-        xPosition,
-        yPosition,
-        color,
-        lineWidth
-    ) {
-        context.save();
-
-        context.strokeStyle = color;
-        context.lineWidth = lineWidth;
-        context.lineJoin = "round";
-        context.lineCap = "round";
-
-        context.beginPath();
-
-        values.forEach((value, index) => {
-            const x = xPosition(index);
-            const y = yPosition(value);
-
-            if (index === 0) {
-                context.moveTo(x, y);
-            } else {
-                context.lineTo(x, y);
-            }
-        });
-
-        context.stroke();
-        context.restore();
-    }
-
-    function drawThresholdLine(
-        context,
-        margin,
-        plotWidth,
-        humidityY
-    ) {
-        const y =
-            humidityY(humidityThreshold);
-
-        context.save();
-
-        context.strokeStyle =
-            "#e02020";
-
-        context.lineWidth = 2;
-
-        context.setLineDash([8, 6]);
-
-        context.beginPath();
-        context.moveTo(margin.left, y);
-        context.lineTo(
-            margin.left + plotWidth,
-            y
-        );
-        context.stroke();
-
-        context.setLineDash([]);
-
-        context.fillStyle =
-            "#e02020";
-
-        context.font =
-            "bold 12px Arial";
-
-        context.textAlign =
-            "right";
-
-        context.fillText(
-            humidityThreshold.toFixed(1) + " g/kg",
-            margin.left + plotWidth - 5,
-            y - 8
-        );
-
-        context.restore();
-    }
-
-    function drawTimeLabels(
-        context,
-        margin,
-        plotHeight,
-        xPosition
-    ) {
-        context.save();
-
-        context.font =
-            "11px Arial";
-
-        context.fillStyle =
-            "#444";
-
-        context.textAlign =
-            "center";
-
-        context.textBaseline =
-            "top";
-
-        let lastDate = "";
-
-        weatherRows.forEach((row, index) => {
-            const dateText =
-                new Intl.DateTimeFormat(
-                    "de-DE",
-                    {
-                        weekday: "short",
-                        day: "2-digit",
-                        month: "2-digit"
-                    }
-                ).format(row.date);
-
-            if (dateText === lastDate) {
-                return;
-            }
-
-            lastDate = dateText;
-
-            const x = xPosition(index);
-            const y =
-                margin.top +
-                plotHeight +
-                12;
-
-            context.fillText(
-                dateText,
-                x,
-                y
-            );
-        });
-
-        context.restore();
-    }
-
-    document
-        .getElementById("refreshButton")
-        .addEventListener("click", loadWeather);
-
-    window.addEventListener(
-        "resize",
-        resizeAndDraw
-    );
-
-    loadWeather();
-</script>
-
-</body>
-</html>
+   
