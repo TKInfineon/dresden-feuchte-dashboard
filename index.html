@@ -1,1 +1,709 @@
-Hallo Welt
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Wetterplot Dresden-Klotzsche</title>
+
+    <!-- Chart.js für die Darstellung des Diagramms -->
+    https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.jsscript>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 24px;
+            background: #f4f6f8;
+            color: #202124;
+            font-family: Arial, Helvetica, sans-serif;
+        }
+
+        .dashboard {
+            width: 100%;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 24px;
+            background: white;
+            border: 1px solid #dfe3e8;
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: 26px;
+            text-align: center;
+        }
+
+        .subtitle {
+            margin: 0 0 20px;
+            color: #60656b;
+            text-align: center;
+        }
+
+        .status {
+            min-height: 24px;
+            margin-bottom: 12px;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .status.loading {
+            color: #245ea8;
+        }
+
+        .status.error {
+            padding: 12px;
+            color: #a40000;
+            background: #ffecec;
+            border: 1px solid #ffbcbc;
+            border-radius: 6px;
+        }
+
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(160px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .summary-card {
+            padding: 14px;
+            background: #f7f9fb;
+            border: 1px solid #e3e7eb;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .summary-label {
+            margin-bottom: 6px;
+            color: #60656b;
+            font-size: 13px;
+        }
+
+        .summary-value {
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .chart-container {
+            position: relative;
+            width: 100%;
+            height: 600px;
+        }
+
+        .footer {
+            margin-top: 16px;
+            color: #60656b;
+            font-size: 12px;
+            text-align: center;
+        }
+
+        a {
+            color: #245ea8;
+        }
+
+        @media (max-width: 750px) {
+            body {
+                padding: 8px;
+            }
+
+            .dashboard {
+                padding: 12px;
+            }
+
+            .summary {
+                grid-template-columns: 1fr;
+            }
+
+            .chart-container {
+                height: 480px;
+            }
+
+            h1 {
+                font-size: 21px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<main class="dashboard">
+    <h1>Dresden-Klotzsche: Temperatur und absolute Feuchte</h1>
+
+    <p class="subtitle">
+        Vorhersage für die nächsten sieben Tage
+    </p>
+
+    <div id="status" class="status loading">
+        Wetterdaten werden geladen ...
+    </div>
+
+    <section id="summary" class="summary" hidden>
+        <div class="summary-card">
+            <div class="summary-label">Aktuelle Temperatur</div>
+            <div id="currentTemperature" class="summary-value">–</div>
+        </div>
+
+        <div class="summary-card">
+            <div class="summary-label">Aktuelle absolute Feuchte</div>
+            <div id="currentHumidity" class="summary-value">–</div>
+        </div>
+
+        <div class="summary-card">
+            <div class="summary-label">Entfeuchtungsgrenze</div>
+            <div id="thresholdValue" class="summary-value">–</div>
+        </div>
+    </section>
+
+    <div class="chart-container">
+        <canvas id="weatherChart"></canvas>
+    </div>
+
+    <div class="footer">
+        Wetterdaten:
+        <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">
+            Open-Meteo
+        </a>
+        · Referenzgrenze: 22 °C und 40 % relative Feuchte
+    </div>
+</main>
+
+<script>
+    "use strict";
+
+    const SETTINGS = {
+        latitude: 51.1328,
+        longitude: 13.7672,
+        timezone: "Europe/Berlin",
+        days: 7,
+        referenceTemperature: 22.0,
+        referenceRelativeHumidity: 0.40
+    };
+
+    let weatherChart = null;
+
+    /**
+     * Sättigungsdampfdruck in hPa nach der Magnus-Formel.
+     */
+    function saturationVaporPressure(temperatureCelsius) {
+        const a = 17.62;
+        const b = 243.12;
+
+        return 6.112 * Math.exp(
+            (a * temperatureCelsius) /
+            (b + temperatureCelsius)
+        );
+    }
+
+    /**
+     * Mischungsverhältnis in g/kg aus Taupunkt und Luftdruck.
+     */
+    function mixingRatioFromDewPoint(dewPointCelsius, pressureHpa) {
+        const vaporPressure =
+            saturationVaporPressure(dewPointCelsius);
+
+        const denominator =
+            Math.max(pressureHpa - vaporPressure, 0.000001);
+
+        return 0.622 * vaporPressure / denominator * 1000;
+    }
+
+    /**
+     * Grenzwert in g/kg aus Referenztemperatur,
+     * relativer Feuchte und Luftdruck.
+     */
+    function calculateThreshold(
+        referenceTemperature,
+        relativeHumidity,
+        pressureHpa
+    ) {
+        const saturatedPressure =
+            saturationVaporPressure(referenceTemperature);
+
+        const referenceVaporPressure =
+            relativeHumidity * saturatedPressure;
+
+        const denominator =
+            Math.max(
+                pressureHpa - referenceVaporPressure,
+                0.000001
+            );
+
+        return (
+            0.622 *
+            referenceVaporPressure /
+            denominator *
+            1000
+        );
+    }
+
+    /**
+     * Median eines Zahlenarrays berechnen.
+     */
+    function median(values) {
+        const sortedValues = [...values]
+            .filter(Number.isFinite)
+            .sort((a, b) => a - b);
+
+        if (sortedValues.length === 0) {
+            return 1013.25;
+        }
+
+        const middle =
+            Math.floor(sortedValues.length / 2);
+
+        if (sortedValues.length % 2 === 0) {
+            return (
+                sortedValues[middle - 1] +
+                sortedValues[middle]
+            ) / 2;
+        }
+
+        return sortedValues[middle];
+    }
+
+    /**
+     * Datum und Uhrzeit für die X-Achse formatieren.
+     */
+    function formatDateTime(date) {
+        return new Intl.DateTimeFormat(
+            "de-DE",
+            {
+                weekday: "short",
+                day: "2-digit",
+                month: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit"
+            }
+        ).format(date);
+    }
+
+    /**
+     * API-Adresse zusammensetzen.
+     */
+    function createApiUrl() {
+        const parameters = new URLSearchParams({
+            latitude: SETTINGS.latitude.toString(),
+            longitude: SETTINGS.longitude.toString(),
+            hourly: [
+                "temperature_2m",
+                "dew_point_2m",
+                "surface_pressure"
+            ].join(","),
+            timezone: SETTINGS.timezone,
+            forecast_days: "8"
+        });
+
+        return (
+            "https://api.open-meteo.com/v1/forecast?" +
+            parameters.toString()
+        );
+    }
+
+    /**
+     * Wetterdaten abrufen und auswerten.
+     */
+    async function loadWeather() {
+        const statusElement =
+            document.getElementById("status");
+
+        try {
+            statusElement.textContent =
+                "Wetterdaten werden geladen ...";
+
+            statusElement.className =
+                "status loading";
+
+            const response =
+                await fetch(createApiUrl());
+
+            if (!response.ok) {
+                throw new Error(
+                    "HTTP-Fehler " + response.status
+                );
+            }
+
+            const data = await response.json();
+
+            if (
+                !data.hourly ||
+                !Array.isArray(data.hourly.time)
+            ) {
+                throw new Error(
+                    "Die Wetter-API hat keine stündlichen Daten geliefert."
+                );
+            }
+
+            const units =
+                data.hourly_units || {};
+
+            const pressureUnit =
+                String(
+                    units.surface_pressure || "hPa"
+                ).toLowerCase();
+
+            const now = new Date();
+
+            const end =
+                new Date(
+                    now.getTime() +
+                    SETTINGS.days *
+                    24 *
+                    60 *
+                    60 *
+                    1000
+                );
+
+            const rows = [];
+
+            for (
+                let index = 0;
+                index < data.hourly.time.length;
+                index++
+            ) {
+                const date =
+                    new Date(data.hourly.time[index]);
+
+                if (date < now || date >= end) {
+                    continue;
+                }
+
+                const temperature =
+                    Number(
+                        data.hourly.temperature_2m[index]
+                    );
+
+                const dewPoint =
+                    Number(
+                        data.hourly.dew_point_2m[index]
+                    );
+
+                let pressure =
+                    Number(
+                        data.hourly.surface_pressure[index]
+                    );
+
+                if (pressureUnit === "pa") {
+                    pressure = pressure / 100;
+                }
+
+                if (
+                    !Number.isFinite(temperature) ||
+                    !Number.isFinite(dewPoint) ||
+                    !Number.isFinite(pressure)
+                ) {
+                    continue;
+                }
+
+                const absoluteHumidity =
+                    mixingRatioFromDewPoint(
+                        dewPoint,
+                        pressure
+                    );
+
+                rows.push({
+                    date,
+                    temperature,
+                    pressure,
+                    absoluteHumidity
+                });
+            }
+
+            if (rows.length === 0) {
+                throw new Error(
+                    "Für den gewählten Zeitraum wurden keine gültigen Daten gefunden."
+                );
+            }
+
+            const referencePressure =
+                median(
+                    rows.map(row => row.pressure)
+                );
+
+            const threshold =
+                calculateThreshold(
+                    SETTINGS.referenceTemperature,
+                    SETTINGS.referenceRelativeHumidity,
+                    referencePressure
+                );
+
+            drawChart(rows, threshold);
+            updateSummary(rows, threshold);
+
+            statusElement.textContent =
+                "Zuletzt aktualisiert: " +
+                new Intl.DateTimeFormat(
+                    "de-DE",
+                    {
+                        dateStyle: "medium",
+                        timeStyle: "short"
+                    }
+                ).format(new Date());
+
+            statusElement.className =
+                "status";
+
+        } catch (error) {
+            console.error(error);
+
+            statusElement.textContent =
+                "Die Wetterdaten konnten nicht geladen werden: " +
+                error.message;
+
+            statusElement.className =
+                "status error";
+        }
+    }
+
+    /**
+     * Zusammenfassung oberhalb des Diagramms aktualisieren.
+     */
+    function updateSummary(rows, threshold) {
+        const current = rows[0];
+
+        document.getElementById(
+            "currentTemperature"
+        ).textContent =
+            current.temperature.toFixed(1) + " °C";
+
+        document.getElementById(
+            "currentHumidity"
+        ).textContent =
+            current.absoluteHumidity.toFixed(1) + " g/kg";
+
+        document.getElementById(
+            "thresholdValue"
+        ).textContent =
+            threshold.toFixed(1) + " g/kg";
+
+        document.getElementById(
+            "summary"
+        ).hidden = false;
+    }
+
+    /**
+     * Wetterdiagramm zeichnen.
+     */
+    function drawChart(rows, threshold) {
+        const canvas =
+            document.getElementById("weatherChart");
+
+        const labels =
+            rows.map(row => formatDateTime(row.date));
+
+        const temperatures =
+            rows.map(row =>
+                Number(row.temperature.toFixed(2))
+            );
+
+        const humidity =
+            rows.map(row =>
+                Number(row.absoluteHumidity.toFixed(2))
+            );
+
+        const thresholdValues =
+            rows.map(() =>
+                Number(threshold.toFixed(2))
+            );
+
+        const humidityPointColors =
+            humidity.map(value =>
+                value >= threshold
+                    ? "#c62828"
+                    : "#16823b"
+            );
+
+        if (weatherChart) {
+            weatherChart.destroy();
+        }
+
+        weatherChart = new Chart(
+            canvas,
+            {
+                type: "line",
+
+                data: {
+                    labels,
+
+                    datasets: [
+                        {
+                            label: "Temperatur [°C]",
+                            data: temperatures,
+                            borderColor: "#8b0000",
+                            backgroundColor: "#8b0000",
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            pointHoverRadius: 5,
+                            tension: 0.2,
+                            yAxisID: "temperatureAxis"
+                        },
+                        {
+                            label: "Absolute Feuchte [g/kg]",
+                            data: humidity,
+                            borderColor: "#16823b",
+                            backgroundColor: "#16823b",
+                            pointBackgroundColor:
+                                humidityPointColors,
+                            pointBorderColor:
+                                humidityPointColors,
+                            borderWidth: 2,
+                            pointRadius: 1.5,
+                            pointHoverRadius: 5,
+                            tension: 0.2,
+                            yAxisID: "humidityAxis"
+                        },
+                        {
+                            label:
+                                "Entfeuchtungsgrenze (" +
+                                threshold.toFixed(1) +
+                                " g/kg)",
+                            data: thresholdValues,
+                            borderColor: "#e02020",
+                            backgroundColor: "#e02020",
+                            borderWidth: 2,
+                            borderDash: [8, 6],
+                            pointRadius: 0,
+                            tension: 0,
+                            yAxisID: "humidityAxis"
+                        }
+                    ]
+                },
+
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+
+                    interaction: {
+                        mode: "index",
+                        intersect: false
+                    },
+
+                    plugins: {
+                        legend: {
+                            position: "top"
+                        },
+
+                        title: {
+                            display: true,
+                            text:
+                                "Heute und die nächsten " +
+                                SETTINGS.days +
+                                " Tage"
+                        },
+
+                        tooltip: {
+                            callbacks: {
+                                label(context) {
+                                    const label =
+                                        context.dataset.label ||
+                                        "";
+
+                                    const value =
+                                        Number(context.parsed.y)
+                                            .toFixed(1);
+
+                                    return label + ": " + value;
+                                },
+
+                                afterBody(context) {
+                                    const humidityItem =
+                                        context.find(
+                                            item =>
+                                                item.datasetIndex === 1
+                                        );
+
+                                    if (
+                                        humidityItem &&
+                                        humidityItem.parsed.y >=
+                                        threshold
+                                    ) {
+                                        return [
+                                            "",
+                                            "Hinweis: Grenzwert überschritten"
+                                        ];
+                                    }
+
+                                    return [];
+                                }
+                            }
+                        }
+                    },
+
+                    scales: {
+                        x: {
+                            ticks: {
+                                autoSkip: true,
+                                maxTicksLimit: 18,
+                                maxRotation: 45,
+                                minRotation: 0
+                            },
+
+                            title: {
+                                display: true,
+                                text:
+                                    "Zeit [" +
+                                    SETTINGS.timezone +
+                                    "]"
+                            },
+
+                            grid: {
+                                color: "rgba(0, 0, 0, 0.08)"
+                            }
+                        },
+
+                        temperatureAxis: {
+                            type: "linear",
+                            position: "left",
+
+                            title: {
+                                display: true,
+                                text: "Temperatur [°C]",
+                                color: "#8b0000"
+                            },
+
+                            ticks: {
+                                color: "#8b0000"
+                            },
+
+                            grid: {
+                                color: "rgba(0, 0, 0, 0.10)"
+                            }
+                        },
+
+                        humidityAxis: {
+                            type: "linear",
+                            position: "right",
+                            suggestedMin: 0,
+
+                            title: {
+                                display: true,
+                                text:
+                                    "Absolute Feuchte [g/kg]",
+                                color: "#16823b"
+                            },
+
+                            ticks: {
+                                color: "#16823b"
+                            },
+
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    }
+                }
+            }
+        );
+    }
+
+    loadWeather();
+</script>
+
+</body>
+</html>
